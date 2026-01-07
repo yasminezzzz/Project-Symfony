@@ -177,7 +177,7 @@ function TutorCreateTest() {
     }));
 
     // Rediriger vers la page PageCourse
-    navigate("/PageCourse");
+    navigate("/courses/${groupId");
   };
 
   const styles = {

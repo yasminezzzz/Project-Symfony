@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 function StudentDashboard() {
   const location = useLocation();
+  const navigate = useNavigate();
   const studentId = location.state?.id;
   const [studentName, setStudentName] = useState("Student");
-  const [studentGroups, setStudentGroups] = useState([]); // Add state for groups
+  const [studentGroups, setStudentGroups] = useState([]);
 
   const [subjects, setSubjects] = useState([]);
   const [selectedSubject, setSelectedSubject] = useState("");
@@ -24,7 +25,7 @@ function StudentDashboard() {
   useEffect(() => {
     fetchSubjects();
     fetchStudentInfo();
-    fetchStudentGroups(); // Fetch groups on load
+    fetchStudentGroups();
   }, []);
 
   useEffect(() => {
@@ -45,7 +46,6 @@ function StudentDashboard() {
     }
   };
 
-  // Fetch student groups
   const fetchStudentGroups = async () => {
     setLoading(prev => ({ ...prev, groups: true }));
     try {
@@ -84,12 +84,10 @@ function StudentDashboard() {
         data.filter(t => t.subject_id === parseInt(selectedSubject)) :
         data;
 
-      // Fetch completed tests for this student
       try {
         const completedRes = await fetch(`http://localhost:8001/api/student/${studentId}/completed-tests`);
         const completedTests = await completedRes.json();
 
-        // Mark tests as passed and add scores
         const testsWithStatus = filtered.map(test => {
           const completedTest = completedTests.find(ct => ct.test_id === test.id);
           return {
@@ -101,7 +99,6 @@ function StudentDashboard() {
 
         setTests(testsWithStatus || []);
       } catch (error) {
-        // If completed tests endpoint fails, just show tests without status
         const testsWithStatus = filtered.map(test => ({
           ...test,
           passed: false,
@@ -151,6 +148,38 @@ function StudentDashboard() {
     return totalQuestions > 0 ? (answeredCount / totalQuestions) * 100 : 0;
   };
 
+  // Fonction pour déterminer le niveau basé sur le score
+  const determineLevelFromScore = (score) => {
+    if (score >= 80) return "advanced";
+    if (score >= 60) return "intermediate";
+    if (score >= 40) return "beginner";
+    return "remedial"; // Pour scores < 40%
+  };
+
+  // Fonction pour créer ou trouver un groupe
+  const getOrCreateGroup = async (subjectName, level, studentId) => {
+    try {
+      // D'abord chercher un groupe existant
+      const findRes = await fetch('http://localhost:8001/api/groups/find-or-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: subjectName,
+          level: level,
+          studentId: studentId
+        })
+      });
+
+      if (findRes.ok) {
+        return await findRes.json();
+      }
+      return null;
+    } catch (error) {
+      console.error("Error finding/creating group:", error);
+      return null;
+    }
+  };
+
   const submitTest = async (testId) => {
     setLoading(prev => ({
       ...prev,
@@ -167,30 +196,47 @@ function StudentDashboard() {
       if (!res.ok) throw new Error("Submit failed");
 
       const data = await res.json();
+      const score = data.score || 0;
 
-      // Show enhanced success message with group info
+      // Déterminer le niveau basé sur le score
+      const level = determineLevelFromScore(score);
+
+      // Récupérer le sujet du test
+      const currentTest = tests.find(t => t.id === testId);
+      const testSubject = subjects.find(s => s.id === currentTest?.subject_id);
+
+      let group = null;
       let message = `✅ Test submitted successfully!\n`;
-      message += `Your score: ${data.score}%\n`;
+      message += `Your score: ${score}%\n`;
+      message += `📊 Level assigned: ${level.toUpperCase()}\n`;
 
-      if (data.group) {
-        message += `🎉 You have been assigned to group: ${data.group.name}\n`;
-        message += `📚 Subject: ${data.group.subject}\n`;
-        message += `🏆 Level: ${data.group.level}`;
+      if (testSubject) {
+        // Trouver ou créer un groupe approprié
+        group = await getOrCreateGroup(testSubject.name, level, studentId);
 
-        // Add the new group to the student groups list
-        setStudentGroups(prev => {
-          // Check if group already exists
-          const groupExists = prev.some(g => g.id === data.group.id);
-          if (!groupExists) {
-            return [...prev, {
-              id: data.group.id,
-              name: data.group.name,
-              level: data.group.level,
-              subject: data.group.subject
-            }];
-          }
-          return prev;
-        });
+        if (group) {
+          message += `🎉 You have been assigned to group: ${group.name}\n`;
+          message += `📚 Subject: ${group.subject}\n`;
+          message += `🏆 Level: ${group.level}\n`;
+
+          // Ajouter le nouveau groupe à la liste
+          setStudentGroups(prev => {
+            const groupExists = prev.some(g => g.id === group.id);
+            if (!groupExists) {
+              return [...prev, {
+                id: group.id,
+                name: group.name,
+                level: group.level,
+                subject: group.subject
+              }];
+            }
+            return prev;
+          });
+        } else {
+          message += `⚠️ Could not assign you to a group. Please contact your instructor.\n`;
+        }
+      } else {
+        message += `⚠️ Subject not found for this test.\n`;
       }
 
       setMsg({
@@ -198,10 +244,17 @@ function StudentDashboard() {
         type: "success"
       });
 
+      // Mettre à jour le test comme complété
       setTests(prev => prev.map(t =>
-        t.id === testId ? { ...t, passed: true, score: data.score } : t
+        t.id === testId ? { ...t, passed: true, score: score } : t
       ));
+
+      // Réinitialiser les réponses
       setAnswers(prev => ({ ...prev, [testId]: {} }));
+
+      // Recharger les groupes de l'étudiant
+      fetchStudentGroups();
+
     } catch (error) {
       setMsg({ text: "Error submitting test", type: "error" });
       console.error(error);
@@ -213,13 +266,92 @@ function StudentDashboard() {
     }
   };
 
-  // Calculate completed tests and average score
+  // API endpoint à créer sur votre backend
+  // Voici un exemple de ce que devrait contenir le fichier backend (Node.js/Express):
+
+  /*
+  // Dans votre backend (par exemple: server.js ou routes/groups.js)
+
+  // Route pour trouver ou créer un groupe
+  app.post('/api/groups/find-or-create', async (req, res) => {
+    try {
+      const { subject, level, studentId } = req.body;
+
+      // 1. Chercher un groupe existant avec ce sujet et niveau
+      const existingGroup = await db.query(
+        'SELECT * FROM groups WHERE subject = ? AND level = ? AND member_count < max_capacity LIMIT 1',
+        [subject, level]
+      );
+
+      let group;
+
+      if (existingGroup.length > 0) {
+        group = existingGroup[0];
+
+        // Ajouter l'étudiant au groupe existant
+        await db.query(
+          'INSERT INTO group_students (group_id, student_id) VALUES (?, ?)',
+          [group.id, studentId]
+        );
+
+        // Mettre à jour le nombre de membres
+        await db.query(
+          'UPDATE groups SET member_count = member_count + 1 WHERE id = ?',
+          [group.id]
+        );
+      } else {
+        // 2. Créer un nouveau groupe
+        const groupName = `${subject} - ${level} Group #${Date.now().toString().slice(-4)}`;
+
+        const [result] = await db.query(
+          'INSERT INTO groups (name, subject, level, member_count, max_capacity) VALUES (?, ?, ?, 1, 30)',
+          [groupName, subject, level]
+        );
+
+        group = {
+          id: result.insertId,
+          name: groupName,
+          subject: subject,
+          level: level,
+          member_count: 1
+        };
+
+        // Ajouter l'étudiant au nouveau groupe
+        await db.query(
+          'INSERT INTO group_students (group_id, student_id) VALUES (?, ?)',
+          [group.id, studentId]
+        );
+      }
+
+      res.json(group);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to find or create group' });
+    }
+  });
+  */
+
+  const handleGroupClick = (groupId) => {
+    const selectedGroup = studentGroups.find(g => g.id === groupId);
+    navigate(`/courses/${groupId}`, {
+      state: {
+        groupId,
+        studentId,
+        studentName,
+        groupName: selectedGroup?.name,
+        groupSubject: selectedGroup?.subject,
+        groupLevel: selectedGroup?.level
+      }
+    });
+  };
+
+  // Calcul des statistiques
   const completedTests = tests.filter(t => t.passed).length;
   const averageScore = tests.filter(t => t.passed).length > 0
     ? tests.filter(t => t.passed).reduce((acc, t) => acc + (t.score || 0), 0) / tests.filter(t => t.passed).length
     : 0;
 
-  // SVG Icons as React components
+  // SVG Icons
   const Icons = {
     BookOpen: () => (
       <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -278,27 +410,21 @@ function StudentDashboard() {
     )
   };
 
-  // Function to get group level color
   const getGroupLevelColor = (level) => {
     if (!level) return '#6b7280';
     switch(level.toLowerCase()) {
-      case 'beginner': return '#10b981'; // Green
+      case 'remedial': return '#dc2626'; // Rouge foncé
+      case 'beginner': return '#10b981'; // Vert
       case 'intermediate': return '#f59e0b'; // Orange
-      case 'advanced': return '#ef4444'; // Red
-      case 'expert': return '#8b5cf6'; // Purple
-      default: return '#6b7280'; // Gray
+      case 'advanced': return '#8b5cf6'; // Violet
+      default: return '#6b7280';
     }
   };
 
-  // Function to get image path
   const getImagePath = (imageFileName) => {
     if (!imageFileName) return "https://via.placeholder.com/150?text=No+Image";
-
-    // Extract just the filename from path if it includes directories
     const filename = imageFileName.split('/').pop();
-
     try {
-      // Assuming your images are stored in src/assets/images/
       return require(`../assets/${filename}`);
     } catch (err) {
       console.error(`Image not found: ${filename}`, err);
@@ -336,6 +462,9 @@ function StudentDashboard() {
             <div>
               <p className="stat-label">Average Score</p>
               <p className="stat-value">{averageScore.toFixed(1)}%</p>
+              <p className="stat-subtext">
+                Based on {completedTests} test{completedTests !== 1 ? 's' : ''}
+              </p>
             </div>
             <div className="stat-icon stat-icon-green">
               <Icons.BarChart3 />
@@ -374,7 +503,7 @@ function StudentDashboard() {
         </div>
       </div>
 
-      {/* Message Alert - Show multi-line messages */}
+      {/* Message Alert */}
       {msg.text && (
         <div className={`message-alert message-${msg.type}`} style={{ whiteSpace: 'pre-line' }}>
           {msg.text}
@@ -383,7 +512,7 @@ function StudentDashboard() {
 
       {/* Main Content */}
       <div className="main-layout">
-        {/* Sidebar - Subject Filter & Groups */}
+        {/* Sidebar */}
         <div className="sidebar-card">
           <div className="card-header">
             <h2 className="card-title">
@@ -410,7 +539,7 @@ function StudentDashboard() {
                 </select>
               </div>
 
-              {/* Subject Cards with Images */}
+              {/* Subject Cards */}
               <div className="subject-cards-container">
                 <p className="quick-links-title">Browse Subjects</p>
                 <div className="subject-cards-grid">
@@ -465,12 +594,16 @@ function StudentDashboard() {
                   <div className="no-groups">
                     <Icons.Target />
                     <p>You haven't been assigned to any groups yet.</p>
-                    <p className="no-groups-hint">Complete a test to get assigned to a group!</p>
+                    <p className="no-groups-hint">Complete a test to get assigned to a group based on your score!</p>
                   </div>
                 ) : (
                   <div className="groups-list">
                     {studentGroups.map((group, index) => (
-                      <div key={group.id || index} className="group-item">
+                      <div
+                        key={group.id || index}
+                        className="group-item clickable-group"
+                        onClick={() => handleGroupClick(group.id)}
+                      >
                         <div className="group-item-header">
                           <div className="group-icon">
                             <Icons.Users />
@@ -532,7 +665,6 @@ function StudentDashboard() {
             </div>
           ) : (
             tests.map(test => {
-              // Get subject for this test to show its image
               const testSubject = subjects.find(s => s.id === test.subject_id);
 
               return (
@@ -562,7 +694,7 @@ function StudentDashboard() {
                           )}
                         </h3>
                         <p className="test-description">
-                          Test ID: #{test.id} • Duration: 30 mins • {test.questions_count || 10} questions
+                          Test ID: #{test.id}
                         </p>
                       </div>
                     </div>
@@ -591,16 +723,17 @@ function StudentDashboard() {
                             className="progress-fill"
                             style={{
                               width: `${test.score}%`,
-                              backgroundColor: test.score >= 80 ? "#10b981" : test.score >= 60 ? "#f59e0b" : "#ef4444"
+                              backgroundColor: test.score >= 80 ? "#8b5cf6" : test.score >= 60 ? "#f59e0b" : test.score >= 40 ? "#10b981" : "#dc2626"
                             }}
                           ></div>
                         </div>
                       </div>
                       <p className="score-message">
-                        Great work! You've successfully completed this test.
-                        {studentGroups.some(g => g.subject === testSubject?.name) && (
-                          <span> Check your groups section to see your assigned learning group for this subject!</span>
-                        )}
+                        {test.score >= 80 ? "Excellent! Advanced level achieved. " :
+                         test.score >= 60 ? "Good job! Intermediate level. " :
+                         test.score >= 40 ? "Good start! Beginner level. " :
+                         "Keep practicing! You've been placed in remedial group. "}
+                        Check your groups section to see your assigned learning group!
                       </p>
                     </div>
                   ) : (
@@ -631,7 +764,6 @@ function StudentDashboard() {
                           </div>
                         ) : (
                           <div className="test-questions">
-                            {/* Progress Bar */}
                             <div className="test-progress">
                               <div className="progress-header">
                                 <span className="progress-label">Progress</span>
@@ -647,7 +779,6 @@ function StudentDashboard() {
 
                             <div className="divider"></div>
 
-                            {/* Questions */}
                             <div className="questions-list">
                               {testQuestions[test.id]?.map((question, index) => (
                                 <div key={question.id} className="question-item">
@@ -734,7 +865,6 @@ function StudentDashboard() {
         </div>
       </div>
 
-      {/* Footer Note */}
       <footer className="dashboard-footer">
         <p>Need help? Contact your instructor or visit the help center</p>
         <p>All tests are automatically saved as you progress</p>
@@ -782,7 +912,6 @@ function StudentDashboard() {
           margin: 0;
         }
 
-        /* Stats grid */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -892,7 +1021,6 @@ function StudentDashboard() {
           to { transform: rotate(360deg); }
         }
 
-        /* Message alert */
         .message-alert {
           padding: 16px;
           border-radius: 8px;
@@ -914,7 +1042,6 @@ function StudentDashboard() {
           border: 1px solid #fecaca;
         }
 
-        /* Groups container in sidebar */
         .groups-container {
           margin-top: 24px;
           padding-top: 16px;
@@ -993,9 +1120,14 @@ function StudentDashboard() {
           transition: all 0.2s;
         }
 
-        .group-item:hover {
+        .clickable-group {
+          cursor: pointer;
+        }
+
+        .clickable-group:hover {
           border-color: #3b82f6;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+          transform: translateY(-1px);
         }
 
         .group-item-header {
@@ -1063,7 +1195,6 @@ function StudentDashboard() {
           color: #9ca3af;
         }
 
-        /* Main layout */
         .main-layout {
           display: grid;
           grid-template-columns: 1fr;
@@ -1079,7 +1210,6 @@ function StudentDashboard() {
           }
         }
 
-        /* Rest of your existing CSS styles... */
         .sidebar-card {
           background: white;
           border-radius: 12px;
@@ -1144,7 +1274,6 @@ function StudentDashboard() {
           cursor: not-allowed;
         }
 
-        /* Subject Cards Styles */
         .subject-cards-container {
           padding-top: 16px;
           border-top: 1px solid #f3f4f6;
