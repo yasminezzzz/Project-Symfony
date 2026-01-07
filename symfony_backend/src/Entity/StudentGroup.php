@@ -6,6 +6,7 @@ use App\Repository\StudentGroupRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
+use App\Entity\Course;
 
 #[ORM\Entity(repositoryClass: StudentGroupRepository::class)]
 class StudentGroup
@@ -29,12 +30,16 @@ class StudentGroup
     #[ORM\JoinTable(name: 'student_group_members')]
     private Collection $students;
 
+    #[ORM\OneToMany(mappedBy: 'group', targetEntity: Course::class, cascade: ['persist', 'remove'])]
+    private Collection $courses;
+
     #[ORM\Column]
     private ?\DateTimeImmutable $createdAt = null;
 
     public function __construct()
     {
         $this->students = new ArrayCollection();
+        $this->courses = new ArrayCollection(); // <- added
         $this->createdAt = new \DateTimeImmutable();
     }
 
@@ -70,6 +75,33 @@ class StudentGroup
     {
         if ($this->students->removeElement($student)) {
             $student->removeStudentGroup($this);
+        }
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Course>
+     */
+    public function getCourses(): Collection
+    {
+        return $this->courses;
+    }
+
+    public function addCourse(Course $course): self
+    {
+        if (!$this->courses->contains($course)) {
+            $this->courses->add($course);
+            $course->setGroup($this); // important for bidirectional
+        }
+        return $this;
+    }
+
+    public function removeCourse(Course $course): self
+    {
+        if ($this->courses->removeElement($course)) {
+            if ($course->getGroup() === $this) {
+                $course->setGroup(null);
+            }
         }
         return $this;
     }

@@ -13,7 +13,6 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api')]
 class AuthController extends AbstractController
 {
-    // ================= REGISTER =================
     #[Route('/register', name: 'api_register', methods: ['POST'])]
     public function register(
         Request $request,
@@ -52,13 +51,13 @@ class AuthController extends AbstractController
 
         return new JsonResponse([
             'message' => 'User registered successfully',
-            'id' => $user->getId(),       // return ID
+            'id' => $user->getId(),
             'email' => $user->getEmail(),
-            'role' => $role               // singular 'role'
+            'role' => $role
         ], 201);
     }
 
-    // ================= LOGIN =================
+
     #[Route('/login', name: 'api_login', methods: ['POST'])]
     public function login(
         Request $request,
@@ -82,11 +81,29 @@ class AuthController extends AbstractController
             return new JsonResponse(['error' => 'Wrong password'], 401);
         }
 
+        // Return user info
         return new JsonResponse([
             'message' => 'Login successful',
-            'id' => $user->getId(),       // ID for React routing
+            'id' => $user->getId(),
             'email' => $user->getEmail(),
-            'role' => $user->getRoles()[0] // singular 'role'
+            'role' => $user->getRoles()[0] ?? null
+        ]);
+    }
+
+    #[Route('/me', name: 'api_me', methods: ['GET'])]
+    public function me(): JsonResponse
+    {
+
+        $user = $this->getUser();
+
+        if (!$user instanceof User) {
+            return new JsonResponse(['error' => 'Not logged in'], 401);
+        }
+
+        return new JsonResponse([
+            'id' => $user->getId(),
+            'email' => $user->getEmail(),
+            'role' => $user->getRoles()[0] ?? null
         ]);
     }
 }

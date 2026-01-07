@@ -22,9 +22,7 @@ class StudentController extends AbstractController
         private EntityManagerInterface $em
     ) {}
 
-    // -------------------------------
-    // GET ALL TESTS
-    // -------------------------------
+
     #[Route('/tests', methods: ['GET'])]
     public function getTests(): JsonResponse
     {
@@ -50,9 +48,7 @@ class StudentController extends AbstractController
         return $this->json($data);
     }
 
-    // -------------------------------
-    // GET ALL SUBJECTS
-    // -------------------------------
+
     #[Route('/subjects', methods: ['GET'])]
     public function getSubjects(): JsonResponse
     {
@@ -67,9 +63,7 @@ class StudentController extends AbstractController
         return $this->json($data);
     }
 
-    // -------------------------------
-    // GET TEST BY ID
-    // -------------------------------
+
     #[Route('/tests/pass/{testId}', methods: ['GET'])]
     public function getTest(int $testId): JsonResponse
     {
@@ -90,9 +84,7 @@ class StudentController extends AbstractController
         ]);
     }
 
-    // -------------------------------
-    // PASS A TEST (SAVE SCORE AND ASSIGN GROUP)
-    // -------------------------------
+
     #[Route('/tests/pass/{testId}', methods: ['POST'])]
     public function passTest(
         int $testId,
@@ -127,7 +119,6 @@ class StudentController extends AbstractController
         $this->em->persist($studentTest);
         $this->em->flush();
 
-        // Assign student to group
         $group = $groupService->createOrAssignGroup($student, $test, $percentage);
 
         return $this->json([
@@ -143,9 +134,7 @@ class StudentController extends AbstractController
         ]);
     }
 
-    // -------------------------------
-    // GET COMPLETED TESTS
-    // -------------------------------
+
     #[Route('/{studentId}/completed-tests', methods: ['GET'])]
     public function completedTests(int $studentId): JsonResponse
     {
@@ -171,9 +160,7 @@ class StudentController extends AbstractController
         return $this->json($data);
     }
 
-    // -------------------------------
-    // GET STUDENT GROUPS
-    // -------------------------------
+
     #[Route('/{studentId}/groups', methods: ['GET'])]
     public function studentGroups(int $studentId): JsonResponse
     {
